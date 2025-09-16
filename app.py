@@ -7,7 +7,7 @@ import re
 import fitz
 
 st.title("ClariFunds-Lite: NGO Receipt Analyzer")
-st.write("Upload an image or PDF (all pages will be processed automatically).")
+st.write("Upload an image or multi-page PDF. Each NGO bill (each page) will be analyzed separately.")
 
 uploaded_file = st.file_uploader("Upload NGO Receipt (Image/PDF)", type=["jpg", "jpeg", "png", "bmp", "pdf"])
 
@@ -16,7 +16,6 @@ def simple_parse(ocr_text):
     total = None
     skip_keywords = ['bill', 'date', 'organisation', 'organization', 'description', 'amount', 'category', 'name', 'cost', 'page', 'inr']
     for line in ocr_text.split('\n'):
-        original = line
         line = line.strip()
         if not line:
             continue
@@ -37,7 +36,7 @@ def simple_parse(ocr_text):
                 continue
             data.append( (desc.strip(), float(amt)) )
             continue
-        # If line is "Total 1234"
+        # Line is "Total 1234"
         if line.lower().startswith("total"):
             nums = re.findall(r'\d+', line)
             if nums:
@@ -50,46 +49,44 @@ def simple_parse(ocr_text):
 
 if uploaded_file:
     try:
-        all_data = []
-        all_totals = []
-        page_count = 1
+        per_page_results = []
         if uploaded_file.type == "application/pdf":
             doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-            page_count = doc.page_count
-            st.info(f"Processing {page_count} PDF pages. (Resource limits may apply on free deployment!)")
-            ocr_texts = []
-            for page_number in range(page_count):
+            for page_number in range(doc.page_count):
                 page = doc.load_page(page_number)
                 pix = page.get_pixmap(dpi=200)
                 img_bytes = pix.tobytes("png")
                 image = Image.open(pd.io.common.BytesIO(img_bytes))
                 st.image(image, caption=f"Page {page_number+1} Preview", use_column_width=True)
                 ocr_text = pytesseract.image_to_string(image)
-                st.code(ocr_text)
                 data, total = simple_parse(ocr_text)
-                all_data.extend(data)
-                if total:
-                    all_totals.append((page_number+1, total))
+                per_page_results.append({
+                    'page': page_number+1,
+                    'df': pd.DataFrame(data, columns=['Category','Amount']),
+                    'total': total
+                })
         else:
             image = Image.open(uploaded_file)
             st.image(image, caption="Image Preview", use_column_width=True)
             ocr_text = pytesseract.image_to_string(image)
-            st.code(ocr_text)
             data, total = simple_parse(ocr_text)
-            all_data.extend(data)
-            if total:
-                all_totals.append((1, total))
-        
-        df = pd.DataFrame(all_data, columns=['Category','Amount'])
-        if df.empty:
-            st.warning("No items detected. Try experimenting with a more clearly printed image.")
-        else:
-            st.write(df)
-            for page_total in all_totals:
-                page, total = page_total
-                page_sum = df['Amount'].sum() if page_count == 1 else "--"
-                st.success(f"(Page {page}) - Reported Total: ₹{total:,.2f}")
+            per_page_results.append({
+                'page': 1,
+                'df': pd.DataFrame(data, columns=['Category','Amount']),
+                'total': total
+            })
 
+        # Show analysis for each page separately
+        for page_result in per_page_results:
+            page_num = page_result['page']
+            df = page_result['df']
+            st.markdown(f"---\n## NGO Expense Analysis: Page {page_num}")
+            if df.empty:
+                st.warning("No items detected on this bill!")
+                continue
+            st.write(df)
+            if page_result['total']:
+                st.success(f"Reported Total: ₹{page_result['total']:,.2f}, Sum of items: ₹{df['Amount'].sum():,.2f}")
             # KPIs
             col1, col2, col3, col4 = st.columns(4)
             col1.metric("Total Expense", f"₹{df['Amount'].sum():,.2f}")
@@ -105,4 +102,4 @@ if uploaded_file:
     except Exception as e:
         st.error(f"Error: {e}")
 
-st.caption("Demo: All pages of PDF are processed. On free tiers, large PDFs may crash or timeout.")
+st.caption("Every NGO bill is analyzed separately for transparent, bill-specific insights. Multi-page PDFs supported!")
