@@ -4,3 +4,4 @@ pytesseract
 pandas
 matplotlib
 pymupdf
+plotly
