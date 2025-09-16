@@ -3,6 +3,7 @@ from PIL import Image
 import pytesseract
 import pandas as pd
 import matplotlib.pyplot as plt
+import plotly.express as px
 import re
 import time
 import fitz  # PyMuPDF for PDF support
@@ -15,6 +16,10 @@ st.write(
 uploaded_file = st.file_uploader("Upload NGO Receipt Image(s) or PDF", type=["jpg", "jpeg", "png", "bmp", "pdf"])
 
 def extract_lines(ocr_text):
+    """
+    Parses OCR text into (Category, Amount) pairs from tables in the receipts.
+    Handles amounts on same or next line, ignores headers/meta lines.
+    """
     lines = [line.strip() for line in ocr_text.split('\n') if line.strip()]
     data = []
     i = 0
@@ -29,6 +34,7 @@ def extract_lines(ocr_text):
         if any(keyword in lower_line for keyword in skip_keywords):
             i += 1
             continue
+        # Try to find number in line
         nums = re.findall(r'\d+(?:,\d{3})*(?:\.\d+)?', line.replace(',', ''))
         if nums:
             possible_amount = nums[-1].replace(',', '')
@@ -77,26 +83,42 @@ if uploaded_file:
             all_data.extend(extract_lines(ocr_text))
 
     if not all_data:
-        st.info("No line items detected. Please use clear and tabulated expense bills.")
+        st.info("No line items detected. Please upload clear and tabulated expense bills.")
     else:
         df = pd.DataFrame(all_data, columns=['Category', 'Amount'])
         st.subheader("Extracted Expenses Across All Pages")
         st.write(df)
 
-        st.subheader("Visual Summary")
-        st.bar_chart(df.groupby('Category')['Amount'].sum())
+        # Info cards
+        total_expense = df['Amount'].sum()
+        max_expense = df['Amount'].max()
+        min_expense = df['Amount'].min()
+        category_max = df.loc[df['Amount'].idxmax(), 'Category']
 
-        fig, ax = plt.subplots()
-        df.groupby('Category')['Amount'].sum().plot.pie(
-            autopct='%1.1f%%', legend=False, ylabel='', ax=ax
-        )
-        st.pyplot(fig)
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Total Expense", f"₹{total_expense:,.2f}")
+        col2.metric("Maximum Expense", f"₹{max_expense:,.2f}")
+        col3.metric("Minimum Expense", f"₹{min_expense:,.2f}")
+        col4.metric("Top Category", category_max)
 
-        top_cat = df.groupby('Category')['Amount'].sum().idxmax()
-        top_val = df.groupby('Category')['Amount'].sum().max()
+        # Bar chart
+        st.subheader("Expense Comparison - Bar Chart")
+        px_bar = px.bar(df.groupby('Category', as_index=False).sum(), x='Category', y='Amount',
+                        labels={'Amount':'Expense (INR)'},
+                        title='Expenses by Category')
+        st.plotly_chart(px_bar, use_container_width=True)
+
+        # Treemap chart
+        st.subheader("Expense Distribution - Treemap")
+        px_treemap = px.treemap(df.groupby('Category', as_index=False).sum(),
+                                path=['Category'], values='Amount',
+                                color='Amount', color_continuous_scale='Viridis',
+                                title='Expense Proportion by Category')
+        st.plotly_chart(px_treemap, use_container_width=True)
+
         st.subheader("AI Recommendation")
         st.write(
-            f"Highest NGO spending category: '{top_cat}' with ₹{top_val:.2f}. Review this for alignment with budget goals."
+            f"Highest NGO spending category: '{category_max}' with ₹{max_expense:,.2f}. Review this to ensure fund utilization is aligned with your objectives."
         )
 
 st.caption("Built for NGOs: Transparent multi-page expense analysis dashboard, ready for Smart India Hackathon.")
