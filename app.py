@@ -7,28 +7,41 @@ import re
 import time
 from difflib import get_close_matches
 
-# NGO-focused reference categories
+# For PDF handling
+import fitz  # PyMuPDF
+
 ref_categories = [
     "Office Supplies", "Travel", "Program", "Food", "Staff", "Utilities",
     "Stationery", "Transport", "Accommodation", "Workshop", "Training", "Misc"
 ]
-fuzzy_threshold = 0.7  # Can be tuned
+fuzzy_threshold = 0.7
 
 st.title("ClariFunds-Lite: NGO Receipt Analyzer")
 st.write(
-    "Upload your NGO’s expense receipt to instantly auto-categorize and visualize spend for transparent fund reporting and compliance."
+    "Upload your NGO’s expense receipt (image or PDF) to auto-categorize and visualize spend for transparent fund reporting and compliance."
 )
 
-uploaded_file = st.file_uploader("Upload NGO Receipt Image", type=["jpg", "jpeg", "png", "bmp"])
+uploaded_file = st.file_uploader("Upload NGO Receipt Image or PDF", type=["jpg", "jpeg", "png", "bmp", "pdf"])
+
+image = None
 
 if uploaded_file:
-    image = Image.open(uploaded_file)
-    st.image(image, caption="Receipt Preview", use_column_width=True)
+    if uploaded_file.type == "application/pdf":
+        # Read first page of PDF as image
+        doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+        page = doc.load_page(0)  # First page
+        pix = page.get_pixmap(dpi=300)
+        img_bytes = pix.tobytes("png")
+        image = Image.open(pd.io.common.BytesIO(img_bytes))
+        st.image(image, caption="Receipt Preview (First Page of PDF)", use_column_width=True)
+    else:
+        image = Image.open(uploaded_file)
+        st.image(image, caption="Receipt Preview", use_column_width=True)
     st.divider()
 
     # AI thinking animation
     with st.spinner("AI is thinking... Extracting and analyzing expenses."):
-        time.sleep(5.5)  # Simulate thinking delay (5–6 seconds)
+        time.sleep(5.5)
         ocr_text = pytesseract.image_to_string(image)
 
     st.subheader("Detected Text (OCR)")
@@ -39,12 +52,10 @@ if uploaded_file:
     for line in lines:
         nums = re.findall(r"\d+\.\d+|\d+", line)
         if nums:
-            # Extract first non-numeric word(s) before the number as category guess
             parts = re.split(r"\d+\.\d+|\d+", line, maxsplit=1)
             raw_cat = parts[0].strip() if parts[0].strip() else "Other"
             try:
                 amount = float(nums[-1])
-                # Fuzzy match raw_cat with ref_categories
                 match = get_close_matches(raw_cat, ref_categories, n=1, cutoff=fuzzy_threshold)
                 if match:
                     cat = match[0]
@@ -57,9 +68,7 @@ if uploaded_file:
                 continue
 
     if not data:
-        st.info(
-            "No line items with clear amounts found. Please upload a clearer NGO expense receipt."
-        )
+        st.info("No line items with clear amounts found. Please upload a clearer NGO expense receipt.")
         df = pd.DataFrame([{'Line': '', 'Category': 'Unknown', 'Amount': 0.0}])
     else:
         df = pd.DataFrame(data)
@@ -104,4 +113,3 @@ if uploaded_file:
             )
 
 st.caption("Built for NGOs: Simple, transparent, and instant expense analysis dashboard.")
-
