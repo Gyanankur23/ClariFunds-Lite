@@ -7,118 +7,133 @@ import re
 import time
 import fitz  # PyMuPDF
 
-st.title("ClariFunds-Lite: NGO Expense Analyzer")
-st.write("Upload multi-page PDFs or images to analyze NGO expense reports accurately.")
+st.title("ClariFunds-Lite: NGO Receipt Analyzer")
+st.write(
+    "Upload multi-page NGO expense PDFs or images. The app analyzes each page separately providing detailed insights."
+)
 
-uploaded_file = st.file_uploader("Upload NGO Receipt (Image/PDF)", type=["jpg", "jpeg", "png", "bmp", "pdf"])
+uploaded_file = st.file_uploader("Upload NGO Receipt Image(s) or PDF", type=["jpg", "jpeg", "png", "bmp", "pdf"])
 
-def extract_data_from_text(text):
-    lines = [line.strip() for line in text.split('\n') if line.strip()]
+def extract_table_data(ocr_text):
+    """
+    Extracts category and amount pairs from OCR text for a single table.
+    Separates out total amount line.
+    Ignores bill no, date, organization, and header lines.
+    """
+    lines = [line.strip() for line in ocr_text.split('\n') if line.strip()]
     data = []
-    skip_keywords = ['total', 'gst', 'tax', 'subtotal', 'amount payable', 'amount due', 'balance']
-    i = 0
-
-    while i < len(lines):
-        line = lines[i]
-        # skip known header or footer lines
-        if any(skip in line.lower() for skip in skip_keywords):
-            i += 1
+    total_amount = None
+    
+    ignore_keywords = [
+        'description', 'amount', 'expense', 'item', 'value', 'purpose',
+        'category', 'name', 'cost', 'bill no', 'date', 'organisation', 
+        'organization', 'inr', 'no.', 'total', 'gst', 'tax', 'subtotal'
+    ]
+    
+    for line in lines:
+        lower = line.lower()
+        if any(word in lower for word in ignore_keywords):
+            # Catch total separately
+            if 'total' in lower:
+                possible_amounts = re.findall(r'\d+(?:,\d{3})*(?:\.\d+)?', line.replace(',', ''))
+                if possible_amounts:
+                    try:
+                        total_amount = float(possible_amounts[-1].replace(',', ''))
+                    except:
+                        pass
             continue
-
-        # Find numbers in current line
-        nums = re.findall(r'\d{1,3}(?:,\d{3})*(?:\.\d+)?', line.replace(',', ''))
-
-        if nums:
-            # The last number is treated as amount
-            amount_str = nums[-1]
+        
+        # Extract last number as amount
+        possible_amounts = re.findall(r'\d+(?:,\d{3})*(?:\.\d+)?', line.replace(',', ''))
+        if possible_amounts:
             try:
-                amount = float(amount_str)
-            except:
-                i += 1
-                continue
-
-            # Extract description
-            # Assume description is everything before the last occurrence of amount
-            idx = line.rfind(amount_str)
-            desc = line[:idx].strip()
-            if not desc and i > 0:
-                # Sometimes description is above in previous line (multi-line cells)
-                desc = lines[i - 1]
-                # don't double count if last entry
-                if data and data[-1][0] == desc:
-                    i += 1
+                amount = float(possible_amounts[-1].replace(',', ''))
+                # Description is line without the last number
+                index = line.rfind(possible_amounts[-1])
+                category = line[:index].strip()
+                if category == '':
+                    # Possible multiline description: skip for simplicity, or try previous line approach
                     continue
-
-            # Add only non-empty descriptions
-            if desc:
-                data.append((desc, amount))
-        i += 1
-    return data
+                data.append((category, amount))
+            except:
+                continue
+                
+    return data, total_amount
 
 if uploaded_file:
-    all_data = []
-
     if uploaded_file.type == "application/pdf":
         doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+        st.write(f"Processing {doc.page_count} pages...")
+    else:
+        doc = None
 
-        with st.spinner(f"Processing {doc.page_count} pages..."):
-            time.sleep(3)  # Simulated delay
+    all_tables = []
+
+    if doc:
+        with st.spinner("AI is analyzing all pages..."):
+            time.sleep(5)
             for page_num in range(doc.page_count):
                 page = doc.load_page(page_num)
                 pix = page.get_pixmap(dpi=300)
                 img_bytes = pix.tobytes("png")
                 image = Image.open(pd.io.common.BytesIO(img_bytes))
-                st.image(image, caption=f"Page {page_num +1} Preview", use_column_width=True)
-
-                text = pytesseract.image_to_string(image)
-                page_data = extract_data_from_text(text)
-                all_data.extend(page_data)
+                st.image(image, caption=f"Page {page_num+1} Preview", use_column_width=True)
+                ocr_text = pytesseract.image_to_string(image)
+                table_data, total = extract_table_data(ocr_text)
+                all_tables.append({'data': table_data, 'total': total, 'page': page_num + 1})
     else:
         image = Image.open(uploaded_file)
         st.image(image, caption="Image Preview", use_column_width=True)
-        with st.spinner("Processing image..."):
-            time.sleep(2)
-            text = pytesseract.image_to_string(image)
-            all_data.extend(extract_data_from_text(text))
+        with st.spinner("AI is analyzing the image..."):
+            time.sleep(3)
+            ocr_text = pytesseract.image_to_string(image)
+            table_data, total = extract_table_data(ocr_text)
+            all_tables.append({'data': table_data, 'total': total, 'page': 1})
 
-    if not all_data:
-        st.warning("No valid expense items detected. Please check the receipt quality.")
-    else:
-        df = pd.DataFrame(all_data, columns=['Category', 'Amount'])
-        st.subheader("Extracted Expenses")
+    # For each table (page), show details separately with charts
+    for table in all_tables:
+        st.markdown(f"---\n## Page {table['page']} Expense Breakdown")
+        df = pd.DataFrame(table['data'], columns=['Category', 'Amount'])
+
+        if df.empty:
+            st.warning("No expense data found on this page.")
+            continue
+
         st.write(df)
 
-        total_expense = df['Amount'].sum()
-        max_expense = df['Amount'].max()
-        min_expense = df['Amount'].min()
-        top_category = df.loc[df['Amount'].idxmax(), 'Category']
+        # Show total if detected
+        if table['total'] is not None:
+            st.write(f"**Reported total:** ₹{table['total']:,.2f}")
+            scraped_total = df['Amount'].sum()
+            st.write(f"**Sum of extracted items:** ₹{scraped_total:,.2f}")
+            if abs(scraped_total - table['total']) > 1:
+                st.warning("Discrepancy detected between reported total and sum of extracted items.")
 
-        # Display cards
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total Expense", f"₹{total_expense:,.2f}")
-        col2.metric("Highest Expense", f"₹{max_expense:,.2f}")
-        col3.metric("Lowest Expense", f"₹{min_expense:,.2f}")
-        col4.metric("Top Category", top_category)
+        # KPI cards
+        total_exp = df['Amount'].sum()
+        max_exp = df['Amount'].max()
+        min_exp = df['Amount'].min()
+        top_cat = df.loc[df['Amount'].idxmax(), 'Category']
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Total Expense", f"₹{total_exp:,.2f}")
+        c2.metric("Maximum Expense", f"₹{max_exp:,.2f}")
+        c3.metric("Minimum Expense", f"₹{min_exp:,.2f}")
+        c4.metric("Top Category", top_cat)
 
         # Bar chart
-        st.subheader("Expense Breakdown - Bar Chart")
-        bar_fig = px.bar(df.groupby('Category', as_index=False).sum(), x='Category', y='Amount',
-                         labels={'Amount': 'Amount (INR)'},
-                         title='Expenses per Category')
+        st.subheader("Expenses by Category - Bar Chart")
+        bar_fig = px.bar(df, x='Category', y='Amount', title="Expense Comparison", labels={'Amount':'INR'})
         st.plotly_chart(bar_fig, use_container_width=True)
 
-        # Treemap for better visualization of many categories
-        st.subheader("Expense Distribution - Treemap")
-        tree_fig = px.treemap(df.groupby('Category', as_index=False).sum(),
-                              path=['Category'], values='Amount', color='Amount',
-                              color_continuous_scale='Blues',
-                              title='Proportion of Expenses')
-        st.plotly_chart(tree_fig, use_container_width=True)
+        # Treemap with amount labels
+        st.subheader("Expenses Proportion - Treemap")
+        treemap_fig = px.treemap(df, path=['Category'], values='Amount', title='Expense Distribution',
+                                 color='Amount', color_continuous_scale='Viridis',
+                                 hover_data={'Amount':':,.2f'})
+        st.plotly_chart(treemap_fig, use_container_width=True)
 
-        # Recommendation
         st.subheader("Recommendation")
-        st.write(f"The largest expense is in the '{top_category}' category "
-                 f"at ₹{max_expense:,.2f}. Review this for budget alignment.")
+        st.write(f"Top spend category: **{top_cat}** with ₹{max_exp:,.2f}. Verify alignment with budget plans.")
 
-st.caption("Built for NGOs: Accurate multi-page expense analysis for transparency and compliance.")
-
+st.caption("Developed for NGOs: Multi-page, reliable, visual expense analytics.")
