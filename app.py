@@ -4,44 +4,47 @@ import pytesseract
 import pandas as pd
 import matplotlib.pyplot as plt
 import re
+import time
 
-st.title("ClariFunds-Lite: Universal Receipt Analyzer")
+st.title("ClariFunds-Lite: NGO Receipt Analyzer")
 st.write(
-    "Upload any expense bill (not limited to specific keywords). "
-    "The tool extracts line items and amounts to provide a useful dashboard."
+    "Upload your NGO’s expense receipt to instantly auto-categorize and visualize spend for transparent fund reporting and compliance."
 )
 
-uploaded_file = st.file_uploader("Upload Receipt Image", type=["jpg", "jpeg", "png", "bmp"])
+uploaded_file = st.file_uploader("Upload NGO Receipt Image", type=["jpg", "jpeg", "png", "bmp"])
 
 if uploaded_file:
     image = Image.open(uploaded_file)
     st.image(image, caption="Receipt Preview", use_column_width=True)
     st.divider()
 
-    ocr_text = pytesseract.image_to_string(image)
+    # AI thinking animation
+    with st.spinner("AI is thinking... Extracting and analyzing expenses."):
+        time.sleep(5.5)  # Simulate thinking delay (5–6 seconds)
+        ocr_text = pytesseract.image_to_string(image)
+
     st.subheader("Detected Text (OCR)")
     st.code(ocr_text, language='text')
 
     data = []
     lines = ocr_text.split('\n')
     for line in lines:
-        # Look for any number (amount) in each line
         nums = re.findall(r"\d+\.\d+|\d+", line)
         if nums:
-            # Use text before the first number as category
+            # Extract first non-numeric word(s) before the number as category
             parts = re.split(r"\d+\.\d+|\d+", line, maxsplit=1)
             cat = parts[0].strip() if parts[0].strip() else "Other"
             try:
                 amount = float(nums[-1])
-                # Clean up category: only take simple words, avoid "Total"/"GST"/"Tax" lines if preferred
                 if cat.lower() in ["total", "tax", "gst"]:
                     continue
                 data.append({'Category': cat.title(), 'Amount': amount})
             except:
                 continue
+
     if not data:
         st.info(
-            "No line items with amounts found. Try with a different or clearer bill image."
+            "No line items with clear amounts found. Please upload a clearer NGO expense receipt."
         )
         df = pd.DataFrame([{'Category': 'Unknown', 'Amount': 0.0}])
     else:
@@ -61,13 +64,11 @@ if uploaded_file:
         )
         st.pyplot(fig)
 
-        # Simple recommendation: Point out top category
+        # Short, NGO-centric recommendation
         top_cat = df.sort_values('Amount', ascending=False).iloc[0]
-        st.subheader("Recommendation")
+        st.subheader("AI Recommendation")
         st.write(
-            f"Most spent on '{top_cat['Category']}'. Review regular high expenses for smarter fund use."
+            f"Most NGO funds spent on '{top_cat['Category']}'. Ensure this aligns with your budget plan and reporting requirements."
         )
 
-st.caption(
-    "Works on any retail, grocery, or service bill for instant dashboard insight."
-)
+st.caption("Built for NGOs: Simple, transparent, and instant expense analysis dashboard.")
