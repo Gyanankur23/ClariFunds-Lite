@@ -7,7 +7,7 @@ import re
 import fitz
 
 st.title("ClariFunds-Lite: NGO Receipt Analyzer")
-st.write("Upload a single-page image or a PDF (first page only for demo reliability).")
+st.write("Upload an image or PDF (all pages will be processed automatically).")
 
 uploaded_file = st.file_uploader("Upload NGO Receipt (Image/PDF)", type=["jpg", "jpeg", "png", "bmp", "pdf"])
 
@@ -50,27 +50,46 @@ def simple_parse(ocr_text):
 
 if uploaded_file:
     try:
+        all_data = []
+        all_totals = []
+        page_count = 1
         if uploaded_file.type == "application/pdf":
             doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-            page = doc.load_page(0)
-            pix = page.get_pixmap(dpi=200)
-            img_bytes = pix.tobytes("png")
-            image = Image.open(pd.io.common.BytesIO(img_bytes))
-            st.image(image, caption="PDF (First Page) Preview", use_column_width=True)
+            page_count = doc.page_count
+            st.info(f"Processing {page_count} PDF pages. (Resource limits may apply on free deployment!)")
+            ocr_texts = []
+            for page_number in range(page_count):
+                page = doc.load_page(page_number)
+                pix = page.get_pixmap(dpi=200)
+                img_bytes = pix.tobytes("png")
+                image = Image.open(pd.io.common.BytesIO(img_bytes))
+                st.image(image, caption=f"Page {page_number+1} Preview", use_column_width=True)
+                ocr_text = pytesseract.image_to_string(image)
+                st.code(ocr_text)
+                data, total = simple_parse(ocr_text)
+                all_data.extend(data)
+                if total:
+                    all_totals.append((page_number+1, total))
         else:
             image = Image.open(uploaded_file)
             st.image(image, caption="Image Preview", use_column_width=True)
-        st.info("Best accuracy is with clean, one-line per item receipts (like LaTeX PDFs/images).")
-        ocr_text = pytesseract.image_to_string(image)
-        st.code(ocr_text)
-        data, total = simple_parse(ocr_text)
-        df = pd.DataFrame(data, columns=['Category','Amount'])
+            ocr_text = pytesseract.image_to_string(image)
+            st.code(ocr_text)
+            data, total = simple_parse(ocr_text)
+            all_data.extend(data)
+            if total:
+                all_totals.append((1, total))
+        
+        df = pd.DataFrame(all_data, columns=['Category','Amount'])
         if df.empty:
             st.warning("No items detected. Try experimenting with a more clearly printed image.")
         else:
             st.write(df)
-            if total:
-                st.success(f"Reported Total: ₹{total:,.2f}; Sum of items: ₹{df['Amount'].sum():,.2f}")
+            for page_total in all_totals:
+                page, total = page_total
+                page_sum = df['Amount'].sum() if page_count == 1 else "--"
+                st.success(f"(Page {page}) - Reported Total: ₹{total:,.2f}")
+
             # KPIs
             col1, col2, col3, col4 = st.columns(4)
             col1.metric("Total Expense", f"₹{df['Amount'].sum():,.2f}")
@@ -86,4 +105,4 @@ if uploaded_file:
     except Exception as e:
         st.error(f"Error: {e}")
 
-st.caption("Demo: For multi-page PDFs, only the first page is processed for stability. For full multi-page features, run locally with higher resources.")
+st.caption("Demo: All pages of PDF are processed. On free tiers, large PDFs may crash or timeout.")
