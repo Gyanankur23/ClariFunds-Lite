@@ -5,17 +5,11 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import re
 
-expense_keywords = {
-    'office': 'Check office supply expenses for savings opportunities.',
-    'travel': 'Plan travel in advance to reduce costs.',
-    'program': 'Review program spending for budget alignment.',
-    'food': 'Bulk purchases may reduce food costs.',
-    'supplies': 'Consider local vendors for better rates.',
-    'misc': 'Audit miscellaneous expenses for unnecessary costs.'
-}
-
-st.title("ClariFunds-Lite: NGO Receipt Analyzer")
-st.write("Upload your NGO’s expense receipt to auto-categorize and visualize spend for transparent reporting.")
+st.title("ClariFunds-Lite: Universal Receipt Analyzer")
+st.write(
+    "Upload any expense bill (not limited to specific keywords). "
+    "The tool extracts line items and amounts to provide a useful dashboard."
+)
 
 uploaded_file = st.file_uploader("Upload Receipt Image", type=["jpg", "jpeg", "png", "bmp"])
 
@@ -28,29 +22,34 @@ if uploaded_file:
     st.subheader("Detected Text (OCR)")
     st.code(ocr_text, language='text')
 
-    # Simple keyword match for categories
     data = []
     lines = ocr_text.split('\n')
-    found_recommendation = ""
     for line in lines:
-        for cat in expense_keywords:
-            if cat in line.lower():
-                nums = re.findall(r"\d+\.\d+|\d+", line)
-                if nums:
-                    amount = float(nums[-1])
-                    data.append({'Category': cat.title(), 'Amount': amount})
-                    # First found category gets the recommendation
-                    if not found_recommendation:
-                        found_recommendation = expense_keywords[cat]
+        # Look for any number (amount) in each line
+        nums = re.findall(r"\d+\.\d+|\d+", line)
+        if nums:
+            # Use text before the first number as category
+            parts = re.split(r"\d+\.\d+|\d+", line, maxsplit=1)
+            cat = parts[0].strip() if parts[0].strip() else "Other"
+            try:
+                amount = float(nums[-1])
+                # Clean up category: only take simple words, avoid "Total"/"GST"/"Tax" lines if preferred
+                if cat.lower() in ["total", "tax", "gst"]:
+                    continue
+                data.append({'Category': cat.title(), 'Amount': amount})
+            except:
+                continue
     if not data:
-        st.info("No recognizable expense categories found in this receipt. Please upload a clearer bill with visible category names like 'office', 'travel', etc.")
+        st.info(
+            "No line items with amounts found. Try with a different or clearer bill image."
+        )
         df = pd.DataFrame([{'Category': 'Unknown', 'Amount': 0.0}])
     else:
         df = pd.DataFrame(data)
-        st.subheader("Expense Categories")
+        st.subheader("Expense Breakdown")
         st.write(df)
 
-        st.subheader("Visual Breakdown")
+        st.subheader("Visual Summary")
         st.bar_chart(df.set_index('Category')['Amount'])
         fig, ax = plt.subplots()
         df.groupby('Category')['Amount'].sum().plot.pie(
@@ -62,14 +61,13 @@ if uploaded_file:
         )
         st.pyplot(fig)
 
+        # Simple recommendation: Point out top category
+        top_cat = df.sort_values('Amount', ascending=False).iloc[0]
         st.subheader("Recommendation")
-        st.write(found_recommendation if found_recommendation else "Expenses detected. Keep tracking for better fund management.")
+        st.write(
+            f"Most spent on '{top_cat['Category']}'. Review regular high expenses for smarter fund use."
+        )
 
-st.caption("Developed using Streamlit and OCR for NGO transparency.")
-
-# requirements.txt
-# streamlit
-# pillow
-# pytesseract
-# pandas
-# matplotlib
+st.caption(
+    "Works on any retail, grocery, or service bill for instant dashboard insight."
+)
