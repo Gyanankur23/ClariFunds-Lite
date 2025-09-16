@@ -2,74 +2,74 @@ import streamlit as st
 from PIL import Image
 import pytesseract
 import pandas as pd
-import io
+import matplotlib.pyplot as plt
 import re
 
-st.set_page_config(page_title="ClariFunds-Lite Dashboard", layout="wide")
+expense_keywords = {
+    'office': 'Check office supply expenses for savings opportunities.',
+    'travel': 'Plan travel in advance to reduce costs.',
+    'program': 'Review program spending for budget alignment.',
+    'food': 'Bulk purchases may reduce food costs.',
+    'supplies': 'Consider local vendors for better rates.',
+    'misc': 'Audit miscellaneous expenses for unnecessary costs.'
+}
 
 st.title("ClariFunds-Lite: NGO Receipt Analyzer")
-st.write("Upload a receipt image. The AI will extract, categorize, and visualize expenses in seconds.")
+st.write("Upload your NGO’s expense receipt to auto-categorize and visualize spend for transparent reporting.")
 
-# Upload Button
-uploaded_file = st.file_uploader("Upload Receipt", type=['jpg', 'jpeg', 'png'])
+uploaded_file = st.file_uploader("Upload Receipt Image", type=["jpg", "jpeg", "png", "bmp"])
 
 if uploaded_file:
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        image = Image.open(uploaded_file)
-        st.image(image, caption='Receipt Preview', use_column_width=True)
+    image = Image.open(uploaded_file)
+    st.image(image, caption="Receipt Preview", use_column_width=True)
+    st.divider()
 
-    # OCR Extraction
-    text = pytesseract.image_to_string(image)
-    
-    # Basic Expense Extraction
-    categories = ['office', 'travel', 'program', 'food', 'supplies', 'misc']
-    lines = text.split('\n')
+    ocr_text = pytesseract.image_to_string(image)
+    st.subheader("Detected Text (OCR)")
+    st.code(ocr_text, language='text')
+
+    # Simple keyword match for categories
     data = []
+    lines = ocr_text.split('\n')
+    found_recommendation = ""
     for line in lines:
-        for cat in categories:
+        for cat in expense_keywords:
             if cat in line.lower():
-                amount = None
-                if '₹' in line:
-                    try:
-                        amount = float(line.split('₹')[-1].strip().split()[0].replace(',', ''))
-                    except:
-                        amount = None
-                else:
-                    nums = re.findall(r"\d+\.\d+|\d+", line)
-                    if nums:
-                        amount = float(nums[-1])
-                if amount:
+                nums = re.findall(r"\d+\.\d+|\d+", line)
+                if nums:
+                    amount = float(nums[-1])
                     data.append({'Category': cat.title(), 'Amount': amount})
+                    # First found category gets the recommendation
+                    if not found_recommendation:
+                        found_recommendation = expense_keywords[cat]
     if not data:
-        # If not found, put total
-        nums = re.findall(r"\d+\.\d+|\d+", text)
-        if nums:
-            data = [{'Category': 'Total', 'Amount': float(nums[-1])}]
-        else:
-            data = [{'Category': 'Unknown', 'Amount': 0.0}]
-    df = pd.DataFrame(data)
+        st.info("No recognizable expense categories found in this receipt. Please upload a clearer bill with visible category names like 'office', 'travel', etc.")
+        df = pd.DataFrame([{'Category': 'Unknown', 'Amount': 0.0}])
+    else:
+        df = pd.DataFrame(data)
+        st.subheader("Expense Categories")
+        st.write(df)
 
-    with col2:
-        st.subheader("Expense Breakdown")
-        st.dataframe(df, use_container_width=True)
-
-        # Charts
-        st.subheader("Visual Summary")
+        st.subheader("Visual Breakdown")
         st.bar_chart(df.set_index('Category')['Amount'])
-        st.write("")  # Spacer
-        st.pyplot(df.set_index('Category').plot.pie(y='Amount', autopct='%1.1f%%', legend=False, ylabel='').get_figure())
+        fig, ax = plt.subplots()
+        df.groupby('Category')['Amount'].sum().plot.pie(
+            y='Amount',
+            autopct='%1.1f%%',
+            legend=False,
+            ylabel='',
+            ax=ax
+        )
+        st.pyplot(fig)
 
-        # Recommendation
-        st.subheader("AI Recommendation")
-        if df['Amount'].sum() == 0:
-            st.write("No clear expense amounts found. Try another image with clearer text and visible numbers.")
-        elif 'Total' in df['Category'].values or 'Unknown' in df['Category'].values:
-            st.write("Check receipt clarity or try specifying expense categories for better recommendations.")
-        else:
-            top_cat = df.sort_values('Amount', ascending=False).iloc[0]
-            st.write(f"Highest spending is in '{top_cat['Category']}'. Consider reviewing and optimizing this category for better fund management.")
+        st.subheader("Recommendation")
+        st.write(found_recommendation if found_recommendation else "Expenses detected. Keep tracking for better fund management.")
 
-else:
-    st.info("Please upload a clear receipt image (jpg, jpeg, or png) to begin analysis.")
+st.caption("Developed using Streamlit and OCR for NGO transparency.")
 
+# requirements.txt
+# streamlit
+# pillow
+# pytesseract
+# pandas
+# matplotlib
