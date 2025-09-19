@@ -85,7 +85,7 @@ streamlit run app.py
 
 **Team NexaAudit**  
 Smart India Hackathon 2025  
-(Contact: [Add GitHub/LinkedIn/email as desired])
+(Contact: [https://github.com/Gyanankur23]
 
 ---
 
